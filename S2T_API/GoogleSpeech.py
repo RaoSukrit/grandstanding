@@ -29,6 +29,8 @@ import argparse
 import io
 import os
 import json
+import pickle
+import pandas as pd
 
 from google.cloud import speech
 
@@ -39,7 +41,7 @@ from google.cloud import speech
 
 
 # [START speech_transcribe_async_gcs]
-def transcribe_gcs(gcs_uri):
+def transcribe_gcs(gcs_uri, output_dir):
     """Asynchronously transcribes the audio file specified by the gcs_uri."""
 
     # Imports the Google Cloud client library
@@ -64,6 +66,7 @@ def transcribe_gcs(gcs_uri):
         sample_rate_hertz=16000,
         language_code="en-US",
         enable_automatic_punctuation=True,
+        enable_word_confidence=True,
         # Enhanced models cost more than standard models.
         use_enhanced=True,
         model="video",
@@ -83,22 +86,57 @@ def transcribe_gcs(gcs_uri):
     output_json = {}
     results_counter = 0
     print(len(response.results))
-    for result in response.results:
-        temp_dict = {}
-        alt = result.alternatives[0]
-        trans = alt.transcript
-        conf = alt.confidence
+
+    # with open('../../sample.pickle', 'wb') as fh:
+    #     pickle.dump(response, fh)
+
+    filename = gcs_uri.rsplit('/', 1)[-1]
+    output_text = "*" * 100
+    output_text += f'\n{filename:^100s}\n'
+    output_text += "*" * 100
+    output_text += '\n'
+
+    for ii, result in enumerate(response.results):
+        alternative = result.alternatives[0]
+        conf = result.alternatives[0].confidence
+        if len(result.alternatives) > 1:
+            for alt in result.alternatives:
+                if alt.confidence > conf:
+                    alternative = alt
+                    conf = alt.confidence
+
+
         by_word = []
-        for word_info in alt.words:
-            by_word.append([word_info.word, word_info.start_time.total_seconds(), word_info.end_time.total_seconds()])
-        output_json[results_counter]=[trans, conf, by_word]
-        results_counter+=1
+        for word_info in alternative.words:
+            by_word.append([word_info.word,
+                            word_info.start_time.total_seconds(),
+                            word_info.end_time.total_seconds()])
+
+        transcript = alternative.transcript
+
+        if len(by_word) > 0:
+            start_time = by_word[0][1]
+            end_time = by_word[-1][-1]
+
+        output_text += f"\nStart Time: {start_time:5.3f}s\t End Time: {end_time:5.3f}s\t Confidence: {conf*100:.4f}%\n"
+        output_text += f"Transcript: {transcript}\n"
+
+        output_json[results_counter]=[transcript, conf, by_word]
+        results_counter += 1
 
 
-    with open("../../{}.json".format(gcs_uri.split('/')[-1].rsplit(".", 1)[0]) , "w+") as file:
+    if not os.path.exists(output_dir):
+        print(f"Creating new output_dir at {output_dir}!\n")
+        os.makedirs(output_dir)
+
+    json_savepath = os.path.join(output_dir, f"{filename.split('.')[0]}.json")
+    with open(f"{json_savepath}", "w+") as file:
         json.dump(output_json, file)
 
-    print("Diarized and transcribed {}".format(gcs_uri.split('/')[-1]))
+    text_savepath = os.path.join(output_dir, f"{filename.split('.')[0]}.txt")
+    pd.DataFrame([output_text]).to_csv(text_savepath, index=False, header=False)
+
+    print(f"Diarized and transcribed {filename}. Output saved in {output_dir} Dir!")
 
 # [END speech_transcribe_async_gcs]
 
@@ -107,8 +145,10 @@ if __name__ == '__main__':
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
-        'path', help='File or GCS path for audio file to be recognized')
+        'input_path', help='File or GCS path for audio file to be recognized')
+    parser.add_argument(
+        'output_dir', help='Dir where the results will be saved')
     #parser.add_argument('num_speakers', help='diarization_speaker_count')
     args = parser.parse_args()
 
-    transcribe_gcs(args.path)
+    transcribe_gcs(args.input_path, args.output_dir)
