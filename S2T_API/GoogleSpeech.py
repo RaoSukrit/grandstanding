@@ -28,10 +28,15 @@ Adjustments by Sophia & Jeff
 import argparse
 import io
 import os
-import json 
+import json
 
-# TODO: Enable data logging for price discount; (Data logging is disabled for this project for Google Cloud Speech API) 
+from google.cloud import speech
+
+# TODO: Enable data logging for price discount; (Data logging is disabled for this project for Google Cloud Speech API)
 #       Speech Adaptation: https://cloud.google.com/speech-to-text/docs/context-strength, https://cloud.google.com/speech-to-text/docs/speech-adaptation
+
+# TODO: add in compatibility with phrase hints, saving results to bucket, passing in multiple files, saving output as text file.
+
 
 # [START speech_transcribe_async_gcs]
 def transcribe_gcs(gcs_uri):
@@ -39,28 +44,27 @@ def transcribe_gcs(gcs_uri):
 
     # Imports the Google Cloud client library
     #from google.cloud import speech
-    from google.cloud import speech
 
     # Instantiates a client
     client = speech.SpeechClient()
-    
+
     # Construct a recognition metadata object
     metadata = speech.RecognitionMetadata()
     metadata.interaction_type = speech.RecognitionMetadata.InteractionType.DISCUSSION
     metadata.recording_device_type = (
         speech.RecognitionMetadata.RecordingDeviceType.OTHER_INDOOR_DEVICE
     )
-    metadata.audio_topic = "court trial hearing" 
+    metadata.audio_topic = "court trial hearing"
     metadata.original_mime_type = "audio/mp3"
 
     audio = speech.RecognitionAudio(uri=gcs_uri)
 
     config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.FLAC,
+        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
         sample_rate_hertz=16000,
         language_code="en-US",
         enable_automatic_punctuation=True,
-        # Enhanced models cost more than standard models. 
+        # Enhanced models cost more than standard models.
         use_enhanced=True,
         model="video",
         enable_word_time_offsets=True,
@@ -73,7 +77,7 @@ def transcribe_gcs(gcs_uri):
     print("Waiting for operation to complete...")
     response = operation.result()
     print(type(response))
-    
+
     print("Saving down results")
     # Writing results to json
     output_json = {}
@@ -89,11 +93,11 @@ def transcribe_gcs(gcs_uri):
             by_word.append([word_info.word, word_info.start_time.total_seconds(), word_info.end_time.total_seconds()])
         output_json[results_counter]=[trans, conf, by_word]
         results_counter+=1
-            
-        
-    with open("{}.json".format(gcs_uri.split('/')[-1][:-5]) , "w+") as file:
+
+
+    with open("../../{}.json".format(gcs_uri.split('/')[-1].rsplit(".", 1)[0]) , "w+") as file:
         json.dump(output_json, file)
-    
+
     print("Diarized and transcribed {}".format(gcs_uri.split('/')[-1]))
 
 # [END speech_transcribe_async_gcs]
